@@ -1,0 +1,42 @@
+#Winget exclude packages from upgrade
+
+$elevated = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")
+if (-not $elevated) {
+  # Le script n'est pas exécuté avec les droits administrateur, demande l'autorisation via l'UAC
+  $arguments = "& '" + $myInvocation.MyCommand.Definition + "'"
+  Start-Process powershell -Verb runAs -ArgumentList $arguments
+  exit
+}
+
+#Liste des paquets a exclure
+#List of packages to exclude
+$package = @("Microsoft.Office", "TortoiseHg.TortoiseHg", "Microsoft.SQLServerManagementStudio")
+
+#Détermine une liste de programmes gérés par winget et crée un fichier en excluant les identifiants des paquets à ne pas mettre à jour.
+#Determines a list of programs managed by winget and creates a file while excluding the ID's of packages that should not be updated
+$path = "$env:USERPROFILE\Local Settings\Temp"
+write-host "Récupération de la liste des applications installer"
+winget export -o "$path\listefile.json" --include-versions 1>$null
+$liste = (Get-ChildItem "$path\listefile.json")
+$file = (get-content -Path $liste | ConvertFrom-Json).Sources.Packages
+$listPacket = ($file | Where-Object {$package -notcontains $_.PackageIdentifier}).PackageIdentifier
+$listPacket > "$path\listepacket.txt"
+
+# Créer une liste des upgrade possible
+#Create a list of possible upgrades
+winget upgrade > "$path\listeupgrade.txt"
+
+#Compare les deux listes pour ne garder que les éléments identiques
+#Compare the two lists to only keep identical elements
+$Compare1 = Select-String -Path "$path\listepacket.txt" -pattern "\b[^\s]+\.[^\s]+\b" -AllMatches | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value
+$Compare2 = Select-String -Path "$path\listeupgrade.txt" -pattern "\b[^\s]+\.[^\s]+\b" -AllMatches | Select-Object -ExpandProperty Matches | Select-Object -ExpandProperty Value
+$commonWords = Compare-Object -ReferenceObject $Compare1 -DifferenceObject $Compare2 -IncludeEqual -ExcludeDifferent
+$commonWords.InputObject > "$path\liste.txt"
+$upgrade = (Get-Content -Path "$path\liste.txt")
+
+#Pour chaque paquet qui peut être mis à jour et n'est pas exclu, il effectue la mise à jour
+#For each package that can be updated and is not excluded, it performs the update
+
+foreach ( $i in $upgrade ) {
+winget upgrade --id $i
+}
